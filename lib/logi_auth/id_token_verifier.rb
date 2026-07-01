@@ -39,6 +39,10 @@ module LogiAuth
       payload = decode_json_segment(parts[1])
       raise IdTokenError, "malformed" if header.nil? || payload.nil?
 
+      # Only RS256 is accepted — never verify a token whose header declares
+      # another (or no) algorithm, even if the RSA signature happens to match.
+      raise IdTokenError, "bad_signature" unless header["alg"] == "RS256"
+
       kid = header["kid"]
       raise IdTokenError, "missing_kid" unless kid.is_a?(String) && !kid.empty?
 
