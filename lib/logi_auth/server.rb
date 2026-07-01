@@ -25,7 +25,7 @@ module LogiAuth
     attr_reader :client_id, :redirect_uri, :issuer, :token_issuer, :default_scopes
 
     def initialize(client_id:, redirect_uri:, client_secret: nil,
-                   issuer: "https://api.1pass.dev", token_issuer: "logi",
+                   issuer: "https://api.1pass.dev", token_issuer: "https://api.1pass.dev",
                    scopes: %w[openid profile:basic email], jwks_cache_ttl: 3600)
       raise ArgumentError, "client_id is required" if client_id.nil? || client_id.empty?
       raise ArgumentError, "redirect_uri is required" if redirect_uri.nil? || redirect_uri.empty?
