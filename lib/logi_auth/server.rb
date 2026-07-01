@@ -63,6 +63,14 @@ module LogiAuth
     # verified Session (sub set only after signature + iss + aud + exp + nonce
     # all pass). Raises ServerError on any failure.
     def exchange_code_and_verify(code:, nonce:, code_verifier: nil)
+      # The server flow ALWAYS generated a nonce in authorization_url, so a
+      # nil/empty nonce here (e.g. an expired session) is a bug — never proceed
+      # with the nonce check silently disabled. (codex P1.)
+      if nonce.nil? || nonce.to_s.empty?
+        raise ServerError.new("invalid_nonce",
+                              "nonce is required — the sign-in session may have expired")
+      end
+
       form = {
         "grant_type" => "authorization_code",
         "code" => code,

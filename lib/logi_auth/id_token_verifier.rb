@@ -51,7 +51,18 @@ module LogiAuth
       end
 
       raise IdTokenError, "iss_mismatch" unless payload["iss"] == expected[:issuer]
-      raise IdTokenError, "aud_mismatch" unless audience_matches?(payload["aud"], expected[:client_id])
+
+      aud = payload["aud"]
+      raise IdTokenError, "aud_mismatch" unless audience_matches?(aud, expected[:client_id])
+      # OIDC §3.1.3.7: with multiple audiences an `azp` MUST be present; whenever
+      # `azp` is present it MUST equal our client_id. Guards against accepting a
+      # token issued to another authorized party that merely also lists us.
+      azp = payload["azp"]
+      if aud.is_a?(Array) && aud.length > 1
+        raise IdTokenError, "aud_mismatch" unless azp == expected[:client_id]
+      elsif !azp.nil?
+        raise IdTokenError, "aud_mismatch" unless azp == expected[:client_id]
+      end
 
       exp = numeric_claim(payload["exp"])
       raise IdTokenError, "expired" if exp.nil? || exp <= now - clock_skew_sec

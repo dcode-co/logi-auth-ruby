@@ -36,4 +36,14 @@ class ServerTest < Minitest::Test
     assert_raises(ArgumentError) { LogiAuth::Server.new(client_id: "", redirect_uri: "x") }
     assert_raises(ArgumentError) { LogiAuth::Server.new(client_id: "x", redirect_uri: "") }
   end
+
+  def test_exchange_rejects_nil_or_empty_nonce_before_any_network
+    err = assert_raises(LogiAuth::ServerError) do
+      build.exchange_code_and_verify(code: "c", nonce: nil)
+    end
+    assert_equal "invalid_nonce", err.code
+    assert_raises(LogiAuth::ServerError) do
+      build.exchange_code_and_verify(code: "c", nonce: "")
+    end
+  end
 end
