@@ -10,6 +10,7 @@ module LogiAuth
     CODES = %w[
       malformed missing_kid unknown_kid bad_signature
       iss_mismatch aud_mismatch expired nonce_mismatch missing_claim
+      at_hash_mismatch
     ].freeze
 
     attr_reader :code

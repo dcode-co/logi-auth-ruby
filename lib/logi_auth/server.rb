@@ -92,7 +92,10 @@ module LogiAuth
         raise ServerError.new("missing_id_token", "Token response had no id_token — was `openid` in the scopes?")
       end
 
-      verified = verify_with_rotation_retry(id_token, nonce)
+      # Thread the access_token so OIDC §3.1.3.6 at_hash binding is enforced
+      # before the Session is returned (present-only: no-op when the id_token
+      # carries no at_hash). parse_token_body guarantees a String access_token.
+      verified = verify_with_rotation_retry(id_token, nonce, tokens["access_token"])
       email = verified.claims["email"]
       expires_in = tokens["expires_in"]
 
@@ -110,17 +113,17 @@ module LogiAuth
 
     private
 
-    def verify_with_rotation_retry(id_token, nonce)
+    def verify_with_rotation_retry(id_token, nonce, access_token = nil)
       expected = { issuer: @token_issuer, client_id: @client_id, nonce: nonce }
       jwks, from_cache = fetch_jwks(force: false)
       begin
-        IdTokenVerifier.verify(id_token, jwks: jwks, expected: expected)
+        IdTokenVerifier.verify(id_token, jwks: jwks, expected: expected, access_token: access_token)
       rescue IdTokenError => e
         # Key rotation within the cache TTL — bust + refetch once.
         if e.code == "unknown_kid" && from_cache
           fresh, = fetch_jwks(force: true)
           begin
-            IdTokenVerifier.verify(id_token, jwks: fresh, expected: expected)
+            IdTokenVerifier.verify(id_token, jwks: fresh, expected: expected, access_token: access_token)
           rescue IdTokenError => retry_err
             raise as_id_token_invalid(retry_err)
           end

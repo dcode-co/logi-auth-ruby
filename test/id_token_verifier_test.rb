@@ -24,12 +24,19 @@ class IdTokenVerifierTest < Minitest::Test
     @vectors["cases"].each do |c|
       name = c["name"]
       expect = c["expect"]
+      # Cases carrying an accessToken exercise OIDC §3.1.3.6 at_hash present-only
+      # binding; cases without it pass nil and skip at_hash (backward compatible).
+      access_token = c["accessToken"]
       if expect["valid"]
-        result = LogiAuth::IdTokenVerifier.verify(c["token"], jwks: @jwks, expected: @expected, now: @now)
+        result = LogiAuth::IdTokenVerifier.verify(
+          c["token"], jwks: @jwks, expected: @expected, now: @now, access_token: access_token
+        )
         assert_equal expect["sub"], result.sub, "case '#{name}' sub mismatch" if expect["sub"]
       else
         err = assert_raises(LogiAuth::IdTokenError, "case '#{name}' expected to be rejected") do
-          LogiAuth::IdTokenVerifier.verify(c["token"], jwks: @jwks, expected: @expected, now: @now)
+          LogiAuth::IdTokenVerifier.verify(
+            c["token"], jwks: @jwks, expected: @expected, now: @now, access_token: access_token
+          )
         end
         assert_equal expect["error"], err.code, "case '#{name}' error code mismatch" if expect["error"]
       end
@@ -39,5 +46,34 @@ class IdTokenVerifierTest < Minitest::Test
   def test_golden_vector_coverage
     assert_operator @vectors["cases"].length, :>=, 9
     assert(@vectors["cases"].any? { |c| c["name"] == "valid" })
+  end
+
+  # Explicit at_hash (OIDC §3.1.3.6) coverage: valid binding, mismatch rejection,
+  # and present-at_hash-but-no-access_token skip (backward compatible).
+  def test_at_hash_present_only_binding
+    %w[at_hash_valid at_hash_mismatch at_hash_present_no_access_token].each do |n|
+      assert(@vectors["cases"].any? { |c| c["name"] == n }, "missing at_hash case '#{n}'")
+    end
+
+    valid = @vectors["cases"].find { |c| c["name"] == "at_hash_valid" }
+    result = LogiAuth::IdTokenVerifier.verify(
+      valid["token"], jwks: @jwks, expected: @expected, now: @now, access_token: valid["accessToken"]
+    )
+    assert_equal "pairwise-sub-0001", result.sub
+
+    mismatch = @vectors["cases"].find { |c| c["name"] == "at_hash_mismatch" }
+    err = assert_raises(LogiAuth::IdTokenError) do
+      LogiAuth::IdTokenVerifier.verify(
+        mismatch["token"], jwks: @jwks, expected: @expected, now: @now, access_token: mismatch["accessToken"]
+      )
+    end
+    assert_equal "at_hash_mismatch", err.code
+
+    # at_hash present but no access_token supplied -> skipped, still valid.
+    skip_case = @vectors["cases"].find { |c| c["name"] == "at_hash_present_no_access_token" }
+    skipped = LogiAuth::IdTokenVerifier.verify(
+      skip_case["token"], jwks: @jwks, expected: @expected, now: @now
+    )
+    assert_equal "pairwise-sub-0001", skipped.sub
   end
 end

@@ -24,12 +24,15 @@ module LogiAuth
     module_function
 
     # Verify +id_token+ and return a Result. Raises IdTokenError on any failure.
-    # Claim order: signature -> iss -> aud -> exp -> iat -> nonce -> sub.
+    # Claim order: signature -> iss -> aud -> exp -> iat -> nonce -> sub -> at_hash.
     #
-    # jwks:     Hash with "keys" => [ {"kty","n","e","kid",...}, ... ]
-    # expected: { issuer:, client_id:, nonce: } (nonce optional)
-    # now:      Unix seconds; defaults to Time.now. Injectable for tests.
-    def verify(id_token, jwks:, expected:, now: nil, clock_skew_sec: 60)
+    # jwks:         Hash with "keys" => [ {"kty","n","e","kid",...}, ... ]
+    # expected:     { issuer:, client_id:, nonce: } (nonce optional)
+    # now:          Unix seconds; defaults to Time.now. Injectable for tests.
+    # access_token: OAuth access_token string. When both the payload carries an
+    #   `at_hash` and this is provided, OIDC §3.1.3.6 at_hash binding is enforced
+    #   (present-only): default nil skips the check, preserving backward compat.
+    def verify(id_token, jwks:, expected:, now: nil, clock_skew_sec: 60, access_token: nil)
       now ||= Time.now.to_i
 
       parts = id_token.split(".")
@@ -46,7 +49,15 @@ module LogiAuth
       kid = header["kid"]
       raise IdTokenError, "missing_kid" unless kid.is_a?(String) && !kid.empty?
 
-      jwk = Array(jwks["keys"]).find { |k| k["kid"] == kid }
+      # Tolerant JWKS key selection: pick the RS256 signing RSA key matching kid.
+      # Guards against a future EC (or encryption) key sharing the kid space —
+      # exact-match kty/use/alg filter keeps login working when JWKS gains keys.
+      jwk = Array(jwks["keys"]).find do |k|
+        k["kty"] == "RSA" &&
+          (k["use"].nil? || k["use"] == "sig") &&
+          (k["alg"].nil? || k["alg"] == "RS256") &&
+          k["kid"] == kid
+      end
       raise IdTokenError, "unknown_kid" if jwk.nil?
 
       signature = base64url_decode(parts[2])
@@ -82,7 +93,22 @@ module LogiAuth
       sub = payload["sub"]
       raise IdTokenError, "missing_claim" unless sub.is_a?(String) && !sub.empty?
 
+      # OIDC §3.1.3.6 at_hash — enforced last, present-only. If the payload
+      # carries an at_hash and an access_token was supplied, they must bind:
+      # base64url_nopad(SHA256(access_token bytes)[0...16]) == at_hash. Absent
+      # at_hash or absent access_token skips the check (backward compatible).
+      at_hash = payload["at_hash"]
+      if access_token && at_hash.is_a?(String) && !at_hash.empty?
+        raise IdTokenError, "at_hash_mismatch" unless at_hash == compute_at_hash(access_token)
+      end
+
       Result.new(sub: sub, claims: payload)
+    end
+
+    # left-most 128 bits of SHA256(access_token), base64url without padding.
+    def compute_at_hash(access_token)
+      digest = OpenSSL::Digest::SHA256.digest(access_token.encode(Encoding::UTF_8))
+      Base64.urlsafe_encode64(digest[0, 16], padding: false)
     end
 
     def verify_rs256(signing_input, signature, jwk)
